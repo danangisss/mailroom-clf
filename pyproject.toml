@@ -1,12 +1,20 @@
 [project]
 name = "mailroom-clf"
-version = "0.1.0"
-description = "Add your description here"
+version = "0.2.0"
+description = "Classify scanned mail into branch, department, and recipient with a local vision model."
 readme = "README.md"
 authors = [
     { name = "nangdosan", email = "danangpostman37@gmail.com" }
 ]
 requires-python = ">=3.13"
+keywords = ["mailroom", "classification", "document-ai", "streamlit", "llama.cpp"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Office/Business",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
 dependencies = [
     "requests>=2.34.2",
     "streamlit>=1.66.0",
