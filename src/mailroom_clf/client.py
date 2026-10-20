@@ -58,6 +58,61 @@ def _post(payload, *, endpoint=None, api_key=None):
     return r.json()
 
 
+def _with_object_criteria(payload, field):
+    """Array criteria -> {id: name} for servers that only accept an object.
+
+    `payload` must carry exactly the field being rewritten. Returns the
+    rewritten payload and the id -> name map needed to translate the answer
+    back into a name.
+    """
+    names = payload["questions"][field]["criteria"]
+    id_map = {str(i): name for i, name in enumerate(names, 1)}
+    rewritten = {**payload,
+                 "questions": {**payload["questions"],
+                               field: {**payload["questions"][field],
+                                       "criteria": id_map}}}
+    return rewritten, id_map
+
+
+def _translate_answer(resp, field, id_map):
+    """Map numeric ids back to names so callers only ever see names."""
+    answer = dict(resp["answers"][field])
+    answer["choice"] = id_map.get(str(answer["choice"]), answer["choice"])
+    answer["probabilities"] = {id_map.get(str(k), k): v
+                               for k, v in answer["probabilities"].items()}
+    return {**resp, "answers": {**resp["answers"], field: answer}}
+
+
+def _rejects_array(exc):
+    """True when the failure looks like 'criteria must be an object'.
+
+    Shape errors are the only ones worth retrying with object criteria; a
+    request that is simply too large must not be sent twice.
+    """
+    response = getattr(exc, "response", None)
+    if response is None:
+        return False
+    if response.status_code not in (400, 422, 500):
+        return False
+    body = (response.text or "").lower()
+    if "too large" in body or "batch size" in body:
+        return False
+    return "criteria" in body and any(
+        word in body for word in ("object", "array", "list", "expected", "type"))
+
+
+def _request(payload, field, *, endpoint=None, api_key=None):
+    """POST one field; fall back to object criteria if the server rejects arrays."""
+    try:
+        return _post(payload, endpoint=endpoint, api_key=api_key)
+    except requests.HTTPError as exc:
+        if not _rejects_array(exc):
+            raise
+        rewritten, id_map = _with_object_criteria(payload, field)
+        resp = _post(rewritten, endpoint=endpoint, api_key=api_key)
+        return _translate_answer(resp, field, id_map)
+
+
 def classify(image_path, *, endpoint=None, api_key=None, model=None, options=None):
     mime, _ = mimetypes.guess_type(image_path)
     with open(image_path, "rb") as f:
@@ -88,7 +143,7 @@ def classify_with_raw_bytes(raw: bytes, mime: str = "image/png", *,
         payload = build_payload_from_uri(data_uri, model=model, only=[field],
                                           options=options)
         t1 = time.perf_counter()
-        resp = _post(payload, endpoint=endpoint, api_key=api_key)
+        resp = _request(payload, field, endpoint=endpoint, api_key=api_key)
         seconds[field] = round(time.perf_counter() - t1, 2)
         answers[field] = resp["answers"][field]
         if resp.get("usage"):

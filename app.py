@@ -22,11 +22,7 @@ from mailroom_clf.questions import build_questions
 FIELD_NAMES = {"branch": "Branch", "department": "Department", "recipient": "Recipient"}
 
 
-def human_label(field, code, options=None):
-    return build_questions(options)[field]["criteria"].get(code, code)
-
-
-def friendly_reason(reason, options=None):
+def friendly_reason(reason):
     """Turn an internal QC reason into plain English for reviewers."""
     if reason == "no flags; ordered by lowest field confidence":
         return "no warning signs"
@@ -34,8 +30,7 @@ def friendly_reason(reason, options=None):
     m = re.match(r"(\w+): model chose '(.+)'$", reason)
     if m:
         field, choice = m.groups()
-        return (f"{FIELD_NAMES.get(field, field)} couldn't be decided "
-                f"({human_label(field, choice, options)})")
+        return f"{FIELD_NAMES.get(field, field)} couldn't be decided ({choice})"
     return reason
 
 
@@ -99,9 +94,8 @@ with st.sidebar:
     st.divider()
     _seed_option_texts()
     with st.expander("Routing options"):
-        st.caption("One per line. Branches and departments: CODE = Label. "
-                   "Recipients: name only. 'unclear', 'other' and 'not_in_list' "
-                   "are added automatically.")
+        st.caption("One name per line. The model answers with one of these "
+                   "names; escape choices are added automatically.")
         branch_text = st.text_area("Branches", key="opt_branch", height=200,
                                    on_change=_options_changed)
         department_text = st.text_area("Departments", key="opt_department", height=200,
@@ -125,9 +119,9 @@ with st.sidebar:
                 return {"type": "choice", "choice": choice,
                         "probabilities": {choice: conf}, "confidence": conf}
 
-            good = {"answers": {"branch": ans("DBS_TOA_PAYOH", 0.97),
-                                "department": ans("CUSTOMER_SERVICE", 0.91),
-                                "recipient": ans("tan_wei_ming", 0.95)}}
+            good = {"answers": {"branch": ans("DBS Toa Payoh", 0.97),
+                                "department": ans("Customer Service / Account Services", 0.91),
+                                "recipient": ans("Tan Wei Ming", 0.95)}}
             st.success(f"Self-test passed (tier {summarize(good)['qc']['tier']})")
         except AssertionError as e:
             st.error(f"Self-test failed: {e}")
@@ -200,7 +194,7 @@ with left:
 with right:
     st.subheader("Routing proposal")
     tier = proposal["qc"]["tier"]
-    friendly = [friendly_reason(r, options) for r in proposal["qc"]["reasons"]]
+    friendly = [friendly_reason(r) for r in proposal["qc"]["reasons"]]
     if tier == 0:
         st.error(f"Needs a closer look: {'; '.join(friendly)}")
     else:
@@ -210,7 +204,7 @@ with right:
     for field in ("branch", "department", "recipient"):
         choice = proposal[field]
         conf = proposal["confidence"][field]
-        st.markdown(f"**{FIELD_NAMES[field]}:** {human_label(field, choice, options)}")
+        st.markdown(f"**{FIELD_NAMES[field]}:** {choice}")
         st.progress(min(max(conf, 0.0), 1.0), text=f"Confidence {conf:.0%}")
         choices = list(questions[field]["criteria"])
         if choice not in choices:
@@ -220,7 +214,6 @@ with right:
             choices,
             index=choices.index(choice),
             key=f"fix_{field}",
-            format_func=lambda s, f=field: questions[f]["criteria"].get(s, s),
         )
 
     if proposal.get("usage"):
@@ -231,8 +224,7 @@ with right:
         with st.expander("Model details (for debugging)"):
             for field, q in proposal["_raw"]["answers"].items():
                 st.markdown(f"**{FIELD_NAMES.get(field, field)}** — most likely first")
-                st.json({human_label(field, k, options): v
-                         for k, v in top_choices(q["probabilities"], 5)})
+                st.json(dict(top_choices(q["probabilities"], 5)))
 
     changed = {f: c for f, c in corrections.items() if c != proposal[f]}
     if changed:

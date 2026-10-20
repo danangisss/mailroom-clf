@@ -13,9 +13,9 @@ PNG = base64.b64decode(
 )
 IMAGE = PNG + b"\x00" * 4
 
-CHOICES = {"branch": "DBS_KOVAN",
-           "department": "WEALTH_INVESTMENT_ADVISORY",
-           "recipient": "lim_hui_ling"}
+CHOICES = {"branch": "DBS Kovan",
+           "department": "Wealth & Investment Advisory",
+           "recipient": "Lim Hui Ling"}
 
 
 @pytest.fixture
@@ -43,22 +43,22 @@ def _selectbox(at, key):
     return next(s for s in at.selectbox if s.key == key)
 
 
-def test_proposal_renders_human_labels(canned_post):
+def test_proposal_renders_names(canned_post):
     at = _classify(AppTest.from_file(APP).run(timeout=30))
     text = " | ".join(m.value for m in at.markdown)
-    assert "DBS Kovan branch" in text
-    assert "Wealth & Investment Advisory" in text
+    assert "**Branch:** DBS Kovan" in text
+    assert "**Department:** Wealth & Investment Advisory" in text
 
 
 def test_reclassifying_clears_an_earlier_correction(canned_post):
     at = _classify(AppTest.from_file(APP).run(timeout=30))
-    assert _selectbox(at, "fix_branch").value == "DBS_KOVAN"
+    assert _selectbox(at, "fix_branch").value == "DBS Kovan"
 
-    _selectbox(at, "fix_branch").set_value("DBS_THOMSON").run(timeout=30)
-    assert _selectbox(at, "fix_branch").value == "DBS_THOMSON"
+    _selectbox(at, "fix_branch").set_value("DBS Thomson").run(timeout=30)
+    assert _selectbox(at, "fix_branch").value == "DBS Thomson"
 
     next(b for b in at.button if b.label == "Classify").click().run(timeout=30)
-    assert _selectbox(at, "fix_branch").value == "DBS_KOVAN"
+    assert _selectbox(at, "fix_branch").value == "DBS Kovan"
 
 
 def test_editing_options_discards_the_proposal(canned_post):

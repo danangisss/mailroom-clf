@@ -15,9 +15,11 @@ def selftest():
     This does NOT test the live endpoint."""
     def ans(choice, conf):
         return {"type": "choice", "choice": choice, "probabilities": {choice: conf}, "confidence": conf}
-    good = {"answers": {"branch": ans("DBS_TOA_PAYOH", 0.97), "department": ans("CUSTOMER_SERVICE", 0.91),
-                        "recipient": ans("tan_wei_ming", 0.95)}}
-    bad = {"answers": {"branch": ans("DBS_TOA_PAYOH", 0.97), "department": ans("CUSTOMER_SERVICE", 0.91),
+    good = {"answers": {"branch": ans("DBS Toa Payoh", 0.97),
+                        "department": ans("Customer Service / Account Services", 0.91),
+                        "recipient": ans("Tan Wei Ming", 0.95)}}
+    bad = {"answers": {"branch": ans("DBS Toa Payoh", 0.97),
+                       "department": ans("Customer Service / Account Services", 0.91),
                        "recipient": ans(NOT_IN_LIST, 0.88)}}
     g, b = summarize(good), summarize(bad)
     assert g["qc"]["tier"] == 1 and b["qc"]["tier"] == 0, (g, b)

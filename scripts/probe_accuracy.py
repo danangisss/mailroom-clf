@@ -6,16 +6,17 @@ environment (`.env` with AI_* names):
 
     set -a; source .env; set +a
     uv run python scripts/probe_accuracy.py letter.png \\
-        --expect-branch DBS_KOVAN \\
-        --expect-department WEALTH_INVESTMENT_ADVISORY \\
-        --expect-recipient lim_hui_ling
+        --expect-branch "DBS Kovan" \\
+        --expect-department "Wealth & Investment Advisory" \\
+        --expect-recipient "Lim Hui Ling"
 
 Blank control (does the model even look at the image? If a blank page gets
 ~the same answers as a real letter, vision input is being ignored):
 
     uv run python scripts/probe_accuracy.py --control-blank \\
-        --expect-branch unclear --expect-department other \\
-        --expect-recipient not_in_list
+        --expect-branch "branch cannot be determined from this page" \\
+        --expect-department "none of the listed departments fits" \\
+        --expect-recipient "recipient missing or not one of the listed people"
 
 Exit 0 = all expectations met. Exit 1 = mismatch (prints diff).
 Never prints credentials.

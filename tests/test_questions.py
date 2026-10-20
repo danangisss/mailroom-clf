@@ -5,6 +5,7 @@ from mailroom_clf.config import BRANCHES, NOT_IN_LIST, OTHER, UNCLEAR
 def test_branch_has_all_branches_plus_unclear():
     criteria = build_questions()["branch"]["criteria"]
     assert len(criteria) == len(BRANCHES) + 1
+    assert criteria[0] == "DBS MBFC"
     assert UNCLEAR in criteria
 
 
@@ -20,12 +21,11 @@ def test_custom_options_replace_the_hardcoded_lists():
     from mailroom_clf.options import RoutingOptions
 
     opts = RoutingOptions(
-        branches={"HQ": "Head Office"},
-        departments={"OPS": "Operations"},
-        people={"a_b": "A B"},
+        branches=["Head Office"],
+        departments=["Operations"],
+        people=["A B"],
     )
     q = build_questions(opts)
-    assert list(q["branch"]["criteria"]) == ["HQ", UNCLEAR]
-    assert q["branch"]["criteria"]["HQ"] == "Head Office branch"
-    assert list(q["department"]["criteria"]) == ["OPS", OTHER]
-    assert list(q["recipient"]["criteria"]) == ["a_b", NOT_IN_LIST]
+    assert q["branch"]["criteria"] == ["Head Office", UNCLEAR]
+    assert q["department"]["criteria"] == ["Operations", OTHER]
+    assert q["recipient"]["criteria"] == ["A B", NOT_IN_LIST]
