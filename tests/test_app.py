@@ -39,8 +39,8 @@ def _classify(at, name="letter.png", raw=None, mime="image/png"):
     return at
 
 
-def _selectbox(at, key):
-    return next(s for s in at.selectbox if s.key == key)
+def _selectbox(at, field):
+    return next(s for s in at.selectbox if s.key.startswith(f"fix_{field}_"))
 
 
 def test_proposal_renders_names(canned_post):
@@ -52,13 +52,17 @@ def test_proposal_renders_names(canned_post):
 
 def test_reclassifying_clears_an_earlier_correction(canned_post):
     at = _classify(AppTest.from_file(APP).run(timeout=30))
-    assert _selectbox(at, "fix_branch").value == "DBS Kovan"
+    assert _selectbox(at, "branch").value == "DBS Kovan"
+    first_key = _selectbox(at, "branch").key
 
-    _selectbox(at, "fix_branch").set_value("DBS Thomson").run(timeout=30)
-    assert _selectbox(at, "fix_branch").value == "DBS Thomson"
+    _selectbox(at, "branch").set_value("DBS Thomson").run(timeout=30)
+    assert _selectbox(at, "branch").value == "DBS Thomson"
+    assert 'branch: "DBS Kovan" → "DBS Thomson"' in " | ".join(
+        w.value for w in at.warning)
 
     next(b for b in at.button if b.label == "Classify").click().run(timeout=30)
-    assert _selectbox(at, "fix_branch").value == "DBS Kovan"
+    assert _selectbox(at, "branch").value == "DBS Kovan"
+    assert _selectbox(at, "branch").key != first_key
 
 
 def test_editing_options_discards_the_proposal(canned_post):

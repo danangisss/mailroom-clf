@@ -55,6 +55,18 @@ def _seed_option_texts():
     st.session_state.setdefault("opt_recipient", recipient_text)
 
 
+def _set_proposal(proposal):
+    """Store a new proposal under a fresh nonce.
+
+    Widget keys include the nonce, so a new proposal can never inherit an old
+    dropdown value from session state.
+    """
+    st.session_state["proposal_nonce"] = st.session_state.get("proposal_nonce", 0) + 1
+    for k in [k for k in st.session_state if k.startswith("fix_")]:
+        del st.session_state[k]
+    st.session_state["proposal"] = proposal
+
+
 def _options_changed():
     st.session_state.pop("proposal", None)
     for k in [k for k in st.session_state if k.startswith("fix_")]:
@@ -157,7 +169,7 @@ if classify_btn and uploaded is not None:
                                        only=[field], options=options)
             p["images"] = [p["images"][0][:60] + "...<truncated>"]
             payloads[field] = p
-        st.session_state["proposal"] = {"dry_run_payload": payloads}
+        _set_proposal({"dry_run_payload": payloads})
     else:
         if not endpoint or not api_key:
             st.error("The endpoint or API key is missing — fill them in the sidebar, "
@@ -169,7 +181,7 @@ if classify_btn and uploaded is not None:
                     raw, mime, endpoint=endpoint, api_key=api_key, model=model,
                     options=options)
                 summary["_raw"] = raw
-                st.session_state["proposal"] = summary
+                _set_proposal(summary)
             except Exception as e:
                 detail = _server_detail(e)
                 message = f"{e} — {detail}" if detail else str(e)
@@ -213,7 +225,7 @@ with right:
             f"Correct the {field} if needed",
             choices,
             index=choices.index(choice),
-            key=f"fix_{field}",
+            key=f"fix_{field}_{st.session_state.get('proposal_nonce', 0)}",
         )
 
     if proposal.get("usage"):
@@ -228,6 +240,8 @@ with right:
 
     changed = {f: c for f, c in corrections.items() if c != proposal[f]}
     if changed:
-        st.warning(f"Corrections: {json.dumps(changed)} (kept on this screen only)")
+        parts = [f'{FIELD_NAMES[f].lower()}: "{proposal[f]}" → "{c}"'
+                 for f, c in changed.items()]
+        st.warning(f"Corrections: {'; '.join(parts)} (kept on this screen only)")
     else:
         st.caption("No corrections — the proposal stands as shown.")
