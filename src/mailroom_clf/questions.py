@@ -7,7 +7,9 @@ from .config import (
     DEPARTMENTS,
     KNOWN_PEOPLE,
     NOT_IN_LIST,
+    NO_THREAT,
     OTHER,
+    THREAT_KEYWORDS,
     UNCLEAR,
 )
 
@@ -35,4 +37,18 @@ def build_questions(options=None):
         "recipient": {"type": "choice",
                       "instructions": "Who is the intended recipient named on the page?",
                       "criteria": [*people, NOT_IN_LIST]},
+    }
+
+
+def build_keyword_question(keywords=None):
+    """The threat-keyword question that rides along with the department one.
+
+    The server has no free-text answers, so this is a choice over a known list;
+    `NO_THREAT` is appended last and never appears in the editable list.
+    """
+    words = [*THREAT_KEYWORDS] if keywords is None else [*keywords]
+    return {
+        "type": "choice",
+        "instructions": "Which of these threat-related words appear on the page?",
+        "criteria": [*words, NO_THREAT],
     }

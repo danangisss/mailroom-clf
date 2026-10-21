@@ -6,6 +6,7 @@ import pytest
 from streamlit.testing.v1 import AppTest
 
 from mailroom_clf import client as client_mod
+from mailroom_clf.config import NO_THREAT, THREAT_DEPARTMENT
 
 APP = Path(__file__).resolve().parents[1] / "app.py"
 PNG = base64.b64decode(
@@ -18,18 +19,39 @@ CHOICES = {"branch": "DBS Kovan",
            "recipient": "Lim Hui Ling"}
 
 
-@pytest.fixture
-def canned_post(monkeypatch):
+def _answer(choice, confidence=0.9):
+    return {"type": "choice", "choice": choice,
+            "probabilities": {choice: confidence}, "confidence": confidence}
+
+
+def _fake_post(monkeypatch, keyword=NO_THREAT, department=None):
     def fake_post(payload, *, endpoint=None, api_key=None):
-        (field, _), = payload["questions"].items()
-        choice = CHOICES[field]
-        ans = {"type": "choice", "choice": choice,
-               "probabilities": {choice: 0.9}, "confidence": 0.9}
-        return {"answers": {field: ans}}
+        answers = {}
+        for field, question in payload["questions"].items():
+            ids = question["criteria"]
+            if field == "threat_keywords":
+                choice = next(i for i, name in ids.items() if name == keyword)
+                answers[field] = _answer(choice, 0.95)
+            else:
+                wanted = department if field == "department" and department else CHOICES[field]
+                choice = next(i for i, name in ids.items() if name == wanted)
+                answers[field] = _answer(choice)
+        return {"answers": answers}
 
     monkeypatch.setattr(client_mod, "_post", fake_post)
     monkeypatch.setenv("AI_BASE_URL", "http://example.invalid")
     monkeypatch.setenv("AI_API_KEY", "test-key")
+
+
+@pytest.fixture
+def canned_post(monkeypatch):
+    _fake_post(monkeypatch)
+
+
+@pytest.fixture
+def threat_post(monkeypatch):
+    _fake_post(monkeypatch, keyword="bomb",
+               department="Customer Service / Account Services")
 
 
 def _classify(at, name="letter.png", raw=None, mime="image/png"):
@@ -90,3 +112,26 @@ def test_reset_restores_the_default_lists():
 
 
 os.environ.pop("AI_BASE_URL", None)
+
+
+def test_threat_keyword_routes_the_department_to_compliance(threat_post):
+    at = _classify(AppTest.from_file(APP).run(timeout=30))
+    text = " | ".join(m.value for m in at.markdown)
+    assert f"**Department:** {THREAT_DEPARTMENT}" in text
+    assert any('Threat keyword "bomb" detected' in w.value for w in at.warning)
+    assert _selectbox(at, "department").value == THREAT_DEPARTMENT
+    assert THREAT_DEPARTMENT in _selectbox(at, "department").options
+
+
+def test_reviewer_override_is_reflected_in_the_threat_note(threat_post):
+    at = _classify(AppTest.from_file(APP).run(timeout=30))
+    _selectbox(at, "department").set_value("Wealth & Investment Advisory").run(timeout=30)
+    warnings = " | ".join(w.value for w in at.warning)
+    assert "reviewer overrode to Wealth & Investment Advisory" in warnings
+
+
+def test_keyword_list_is_editable_in_the_sidebar(canned_post):
+    at = AppTest.from_file(APP).run(timeout=30)
+    assert len(at.text_area) == 4
+    at.text_area[3].set_value("# none left").run(timeout=30)
+    assert any("threat keyword: add at least one option" in e.value for e in at.error)

@@ -18,20 +18,34 @@ from mailroom_clf import (
 )
 from mailroom_clf.options import default_options, format_options, parse_options
 from mailroom_clf.questions import build_questions
+from mailroom_clf.config import THREAT_DEPARTMENT
 
-FIELD_NAMES = {"branch": "Branch", "department": "Department", "recipient": "Recipient"}
+FIELD_NAMES = {"branch": "Branch", "department": "Department", "recipient": "Recipient",
+               "threat_keywords": "Threat keywords"}
 
 
 def friendly_reason(reason):
     """Turn an internal QC reason into plain English for reviewers."""
-    if reason == "no flags; ordered by lowest field confidence":
+    if reason == "no flags":
         return "no warning signs"
     import re
+    m = re.match(r"(\w+): threat keyword '(.+)' detected; routed to (.+)$", reason)
+    if m:
+        keyword, target = m.group(2), m.group(3)
+        return f'Threat keyword "{keyword}" detected — sent to {target}'
+    m = re.match(r"(\w+): threat keyword '(.+)' detected; already (.+)$", reason)
+    if m:
+        keyword, target = m.group(2), m.group(3)
+        return f'Threat keyword "{keyword}" detected — already sent to {target}'
     m = re.match(r"(\w+): model chose '(.+)'$", reason)
     if m:
         field, choice = m.groups()
         return f"{FIELD_NAMES.get(field, field)} couldn't be decided ({choice})"
     return reason
+
+
+def _is_threat_reason(reason):
+    return "threat keyword '" in reason
 
 
 def _server_detail(exc):
@@ -49,10 +63,12 @@ def _server_detail(exc):
 
 
 def _seed_option_texts():
-    branch_text, department_text, recipient_text = format_options(default_options())
+    branch_text, department_text, recipient_text, keyword_text = format_options(
+        default_options())
     st.session_state.setdefault("opt_branch", branch_text)
     st.session_state.setdefault("opt_department", department_text)
     st.session_state.setdefault("opt_recipient", recipient_text)
+    st.session_state.setdefault("opt_keywords", keyword_text)
 
 
 def _set_proposal(proposal):
@@ -74,10 +90,12 @@ def _options_changed():
 
 
 def _reset_options():
-    branch_text, department_text, recipient_text = format_options(default_options())
+    branch_text, department_text, recipient_text, keyword_text = format_options(
+        default_options())
     st.session_state["opt_branch"] = branch_text
     st.session_state["opt_department"] = department_text
     st.session_state["opt_recipient"] = recipient_text
+    st.session_state["opt_keywords"] = keyword_text
     _options_changed()
 
 
@@ -114,14 +132,19 @@ with st.sidebar:
                                        on_change=_options_changed)
         recipient_text = st.text_area("Recipients", key="opt_recipient", height=200,
                                       on_change=_options_changed)
-        options, option_errors = parse_options(branch_text, department_text, recipient_text)
+        keyword_text = st.text_area("Threat keywords", key="opt_keywords", height=140,
+                                    on_change=_options_changed,
+                                    help="Any match routes the item to Compliance.")
+        options, option_errors = parse_options(
+            branch_text, department_text, recipient_text, keyword_text)
         if option_errors:
             for err in option_errors:
                 st.error(err)
         else:
             st.caption(f"{len(options.branches)} branches · "
                        f"{len(options.departments)} departments · "
-                       f"{len(options.people)} recipients")
+                       f"{len(options.people)} recipients · "
+                       f"{len(options.keywords)} threat keywords")
         st.button("Reset to defaults", on_click=_reset_options)
     st.divider()
     dry_run = st.checkbox("Dry run (don't call the model)", value=False)
@@ -147,7 +170,6 @@ if uploaded is None:
     st.session_state.pop("file_id", None)
     for k in [k for k in st.session_state if k.startswith("fix_")]:
         del st.session_state[k]
-    st.info("Upload a scan and press Classify to see the routing proposal.")
     st.stop()
 
 file_id = hashlib.sha256(uploaded.getvalue()).hexdigest()
@@ -190,7 +212,6 @@ if classify_btn and uploaded is not None:
 
 proposal = st.session_state.get("proposal")
 if proposal is None:
-    st.info("Upload a scan and press Classify to see the routing proposal.")
     st.stop()
 
 if "dry_run_payload" in proposal:
@@ -204,21 +225,24 @@ with left:
     st.subheader("Scanned letter")
     st.image(uploaded.getvalue(), width="stretch")
 with right:
-    st.subheader("Routing proposal")
+    st.subheader("Result")
     tier = proposal["qc"]["tier"]
-    friendly = [friendly_reason(r) for r in proposal["qc"]["reasons"]]
+    threats = (proposal.get("threat") or {}).get("keywords") or []
+    friendly = [friendly_reason(r) for r in proposal["qc"]["reasons"]
+                if not _is_threat_reason(r)]
     if tier == 0:
-        st.error(f"Needs a closer look: {'; '.join(friendly)}")
+        detail = "; ".join(friendly) or "a threat keyword needs a human decision"
+        st.error(f"Needs a closer look: {detail}")
     else:
         st.success(f"Looks good — {'; '.join(friendly)}")
 
     corrections = {}
     for field in ("branch", "department", "recipient"):
         choice = proposal[field]
-        conf = proposal["confidence"][field]
         st.markdown(f"**{FIELD_NAMES[field]}:** {choice}")
-        st.progress(min(max(conf, 0.0), 1.0), text=f"Confidence {conf:.0%}")
         choices = list(questions[field]["criteria"])
+        if field == "department" and THREAT_DEPARTMENT not in choices:
+            choices.insert(len(choices) - 1, THREAT_DEPARTMENT)
         if choice not in choices:
             choices = [choice] + choices
         corrections[field] = st.selectbox(
@@ -237,8 +261,25 @@ with right:
             for field, q in proposal["_raw"]["answers"].items():
                 st.markdown(f"**{FIELD_NAMES.get(field, field)}** — most likely first")
                 st.json(dict(top_choices(q["probabilities"], 5)))
+            threat_raw = proposal["_raw"].get("threat") or {}
+            if threat_raw.get("probabilities"):
+                st.markdown("**Threat keywords** — most likely first")
+                st.json(dict(top_choices(threat_raw["probabilities"], 5)))
 
     changed = {f: c for f, c in corrections.items() if c != proposal[f]}
+    if threats:
+        quoted = ", ".join(f'"{k}"' for k in threats)
+        if corrections["department"] != proposal["department"]:
+            st.warning(f"Threat keyword {quoted} detected; reviewer overrode "
+                       f"to {corrections['department']}.")
+        elif proposal.get("threat", {}).get("model_department") == proposal["department"]:
+            st.warning(f"Threat keyword {quoted} detected — already sent to "
+                       f"{proposal['department']}.")
+        else:
+            st.warning(f"Threat keyword {quoted} detected — route to "
+                       f"{proposal['department']}.")
+        changed = {f: c for f, c in changed.items() if f != "department"}
+
     if changed:
         parts = [f'{FIELD_NAMES[f].lower()}: "{proposal[f]}" → "{c}"'
                  for f, c in changed.items()]

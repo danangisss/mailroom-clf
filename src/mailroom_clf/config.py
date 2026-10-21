@@ -8,7 +8,7 @@ values in as those arguments; the CLI relies on the environment.
 STRESS-TEST DATA: the first 10 branches, the first 7 departments and the
 first 4 people are the original demo entries. Everything after them is synthetic
 and only exists to test how the model behaves with ~170 options per question. The
-extra branch names are built from Singapore area names and are not a claim about
+extra branch names are built from Singapore area names and are notx a claim about
 real DBS branches. The extra people are fictional.
 
 Options are plain names: the model chooses one of these strings, and the name is
@@ -546,6 +546,28 @@ UNCLEAR = "branch cannot be determined from this page"
 OTHER = "none of the listed departments fits"
 NOT_IN_LIST = "recipient missing or not one of the listed people"
 ESCAPES = {UNCLEAR, OTHER, NOT_IN_LIST}
+
+# Threat keywords: a choice question over this list rides along with the
+# department question. Any keyword at or above THREAT_THRESHOLD overrides the
+# department to THREAT_DEPARTMENT and forces the item to the front of the QC
+# queue. The server has no free-text answers, so detection is always against a
+# known list rather than open-ended extraction.
+NO_THREAT = "none of these"
+THREAT_DEPARTMENT = "Compliance"
+THREAT_THRESHOLD = 0.6
+MAX_THREAT_KEYWORDS = 20
+THREAT_KEYWORDS = [
+    "bomb",
+    "explosive",
+    "anthrax",
+    "threat",
+    "kill",
+    "attack",
+    "gun",
+    "shooting",
+    "hostage",
+    "arson",
+]
 
 # None = every branch/department pair counts as valid until the project owner
 # confirms which departments exist at which branch.

@@ -1,5 +1,12 @@
-from mailroom_clf import build_questions
-from mailroom_clf.config import BRANCHES, NOT_IN_LIST, OTHER, UNCLEAR
+from mailroom_clf import build_keyword_question, build_questions
+from mailroom_clf.config import (
+    BRANCHES,
+    NO_THREAT,
+    NOT_IN_LIST,
+    OTHER,
+    THREAT_KEYWORDS,
+    UNCLEAR,
+)
 
 
 def test_branch_has_all_branches_plus_unclear():
@@ -24,8 +31,21 @@ def test_custom_options_replace_the_hardcoded_lists():
         branches=["Head Office"],
         departments=["Operations"],
         people=["A B"],
+        keywords=["bomb"],
     )
     q = build_questions(opts)
     assert q["branch"]["criteria"] == ["Head Office", UNCLEAR]
     assert q["department"]["criteria"] == ["Operations", OTHER]
     assert q["recipient"]["criteria"] == ["A B", NOT_IN_LIST]
+
+
+def test_keyword_question_uses_the_defaults_and_ends_with_none():
+    q = build_keyword_question()
+    assert q["type"] == "choice"
+    assert q["criteria"] == [*THREAT_KEYWORDS, NO_THREAT]
+    assert q["criteria"][-1] == NO_THREAT
+
+
+def test_keyword_question_accepts_custom_keywords():
+    q = build_keyword_question(["bomb", "gun"])
+    assert q["criteria"] == ["bomb", "gun", NO_THREAT]

@@ -13,15 +13,23 @@ The physical letter the scan was taken from.
 _Avoid_: Document, letter
 
 **Proposal**:
-The three predicted routings (branch, department, recipient), each with a confidence.
+The three predicted routings (branch, department, recipient), each with a confidence. When a threat keyword is detected the department shown is the escalation target, not the model's raw choice.
 _Avoid_: Prediction, result, classification
 
 **Correction**:
 A QC reviewer's per-field fix to the proposal, held in UI state only.
 _Avoid_: Edit, override, label
 
+**Threat keyword**:
+A word from the reviewer-editable threat list (default: bomb, explosive, anthrax, threat, kill, attack, gun, shooting, hostage, arson) that the model scores at or above the 0.6 threshold on the scan. Detection is a choice question over that list — the endpoint has no free-text answers — so only listed words can ever be detected.
+_Avoid_: Suspicious word, flag, signal
+
+**Threat override**:
+The automatic routing of a mail item to Compliance when a threat keyword is detected. It replaces the department in the proposal, keeps branch and recipient, forces QC tier 0, and is recorded next to the keyword that caused it. A reviewer's correction to the department wins over it.
+_Avoid_: Escalation, block, flag
+
 **QC tier**:
-Urgency of human review. Tier 0 means look first (escape chosen or invalid combination); tier 1 means queue normally by lowest confidence.
+Urgency of human review. Tier 0 means look first (escape chosen, threat keyword detected, or invalid combination); tier 1 means queue normally by lowest confidence.
 _Avoid_: Priority, flag, score
 
 **Escape**:
@@ -29,5 +37,5 @@ An explicit model opt-out, phrased as a sentence the reviewer can read: "branch 
 _Avoid_: Fallback, default, unknown
 
 **Routing options**:
-The branch, department and recipient lists used for one session, editable by the reviewer in the sidebar as one plain name per line. The name is both the model's answer and what the reviewer sees. Defaults come from the hardcoded lists in `config`; edits are not persisted.
+The branch, department and recipient lists plus the threat keyword list used for one session, editable by the reviewer in the sidebar as one plain name per line. The name is both the model's answer and what the reviewer sees. Defaults come from the hardcoded lists in `config`; edits are not persisted.
 _Avoid_: Options, settings, catalogue

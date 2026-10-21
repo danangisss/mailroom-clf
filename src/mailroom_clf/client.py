@@ -6,8 +6,15 @@ import time
 
 import requests
 
-from .config import ESCAPES, VALID_COMBOS, get_settings
-from .questions import build_questions
+from .config import (
+    ESCAPES,
+    NO_THREAT,
+    THREAT_DEPARTMENT,
+    THREAT_THRESHOLD,
+    VALID_COMBOS,
+    get_settings,
+)
+from .questions import build_keyword_question, build_questions
 
 
 def to_data_uri(path):
@@ -34,6 +41,9 @@ def build_payload_from_uri(data_uri, model=None, only=None, options=None):
     questions = build_questions(options)
     if only is not None:
         questions = {f: questions[f] for f in only}
+    if "department" in questions:
+        questions["threat_keywords"] = build_keyword_question(
+            None if options is None else options.keywords)
     return {
         "model": settings["model"],
         "state": STATE,
@@ -58,59 +68,41 @@ def _post(payload, *, endpoint=None, api_key=None):
     return r.json()
 
 
-def _with_object_criteria(payload, field):
-    """Array criteria -> {id: name} for servers that only accept an object.
+def _as_object_criteria(payload):
+    """Array criteria -> {id: name} for every question in the payload.
 
-    `payload` must carry exactly the field being rewritten. Returns the
-    rewritten payload and the id -> name map needed to translate the answer
-    back into a name.
+    The server only accepts object criteria. Returns the rewritten payload and
+    the per-question id -> name maps needed to translate answers back to names.
     """
-    names = payload["questions"][field]["criteria"]
-    id_map = {str(i): name for i, name in enumerate(names, 1)}
-    rewritten = {**payload,
-                 "questions": {**payload["questions"],
-                               field: {**payload["questions"][field],
-                                       "criteria": id_map}}}
-    return rewritten, id_map
+    questions, maps = {}, {}
+    for field, question in payload["questions"].items():
+        names = question["criteria"]
+        id_map = {str(i): name for i, name in enumerate(names, 1)}
+        questions[field] = {**question, "criteria": id_map}
+        maps[field] = id_map
+    return {**payload, "questions": questions}, maps
 
 
-def _translate_answer(resp, field, id_map):
+def _translate_answers(resp, maps):
     """Map numeric ids back to names so callers only ever see names."""
-    answer = dict(resp["answers"][field])
-    answer["choice"] = id_map.get(str(answer["choice"]), answer["choice"])
-    answer["probabilities"] = {id_map.get(str(k), k): v
-                               for k, v in answer["probabilities"].items()}
-    return {**resp, "answers": {**resp["answers"], field: answer}}
+    answers = dict(resp["answers"])
+    for field, id_map in maps.items():
+        answer = answers.get(field)
+        if answer is None:
+            continue
+        answer = dict(answer)
+        answer["choice"] = id_map.get(str(answer["choice"]), answer["choice"])
+        answer["probabilities"] = {id_map.get(str(k), k): v
+                                   for k, v in answer["probabilities"].items()}
+        answers[field] = answer
+    return {**resp, "answers": answers}
 
 
-def _rejects_array(exc):
-    """True when the failure looks like 'criteria must be an object'.
-
-    Shape errors are the only ones worth retrying with object criteria; a
-    request that is simply too large must not be sent twice.
-    """
-    response = getattr(exc, "response", None)
-    if response is None:
-        return False
-    if response.status_code not in (400, 422, 500):
-        return False
-    body = (response.text or "").lower()
-    if "too large" in body or "batch size" in body:
-        return False
-    return "criteria" in body and any(
-        word in body for word in ("object", "array", "list", "expected", "type"))
-
-
-def _request(payload, field, *, endpoint=None, api_key=None):
-    """POST one field; fall back to object criteria if the server rejects arrays."""
-    try:
-        return _post(payload, endpoint=endpoint, api_key=api_key)
-    except requests.HTTPError as exc:
-        if not _rejects_array(exc):
-            raise
-        rewritten, id_map = _with_object_criteria(payload, field)
-        resp = _post(rewritten, endpoint=endpoint, api_key=api_key)
-        return _translate_answer(resp, field, id_map)
+def _request(payload, *, endpoint=None, api_key=None):
+    """POST the payload with object criteria and answer names restored."""
+    rewritten, maps = _as_object_criteria(payload)
+    return _translate_answers(_post(rewritten, endpoint=endpoint, api_key=api_key),
+                              maps)
 
 
 def classify(image_path, *, endpoint=None, api_key=None, model=None, options=None):
@@ -138,20 +130,25 @@ def classify_with_raw_bytes(raw: bytes, mime: str = "image/png", *,
     """
     data_uri = to_data_uri_bytes(raw, mime)
     answers, usages, seconds = {}, [], {}
+    keyword_answer = None
     t0 = time.perf_counter()
     for field in FIELDS:
         payload = build_payload_from_uri(data_uri, model=model, only=[field],
                                           options=options)
         t1 = time.perf_counter()
-        resp = _request(payload, field, endpoint=endpoint, api_key=api_key)
+        resp = _request(payload, endpoint=endpoint, api_key=api_key)
         seconds[field] = round(time.perf_counter() - t1, 2)
         answers[field] = resp["answers"][field]
+        keyword_answer = resp["answers"].get("threat_keywords", keyword_answer)
         if resp.get("usage"):
             usages.append(resp["usage"])
     seconds["total"] = round(time.perf_counter() - t0, 2)
     usage = _merge_usage(usages) or {}
     usage["seconds"] = seconds
     data = {"answers": answers, "usage": usage}
+    if keyword_answer is not None:
+        data["threat"] = {"keywords": detect_threat(keyword_answer),
+                          "probabilities": keyword_answer["probabilities"]}
     return summarize(data), data
 
 
@@ -170,15 +167,33 @@ def top_choices(probabilities, n=5):
     return sorted(probabilities.items(), key=lambda kv: -kv[1])[:n]
 
 
-def qc_priority(answers):
+def detect_threat(answer, threshold=THREAT_THRESHOLD):
+    """Keywords at or above `threshold`, most likely first. `NO_THREAT` never counts."""
+    probabilities = answer.get("probabilities") or {}
+    hits = [(name, p) for name, p in probabilities.items()
+            if name != NO_THREAT and p >= threshold]
+    return [name for name, _ in sorted(hits, key=lambda kv: (-kv[1], kv[0]))]
+
+
+def qc_priority(answers, keywords=(), model_department=None):
     """Lower number = look at it sooner. Every document still goes to a human."""
     reasons = []
     for field in ("branch", "department", "recipient"):
+        if field == "department" and keywords:
+            continue
         if answers[field]["choice"] in ESCAPES:
             reasons.append(f"{field}: model chose '{answers[field]['choice']}'")
     pair = (answers["branch"]["choice"], answers["department"]["choice"])
     if VALID_COMBOS is not None and pair not in VALID_COMBOS:
         reasons.append(f"branch/department combination {pair} is not valid")
+    if keywords:
+        hit = keywords[0]
+        if model_department == THREAT_DEPARTMENT:
+            reasons.append(f"department: threat keyword '{hit}' detected; "
+                           f"already {THREAT_DEPARTMENT}")
+        else:
+            reasons.append(f"department: threat keyword '{hit}' detected; "
+                           f"routed to {THREAT_DEPARTMENT}")
     min_conf = min(a["confidence"] for a in answers.values())
     if reasons:
         return 0, min_conf, reasons       # top of the queue
@@ -187,12 +202,21 @@ def qc_priority(answers):
 
 def summarize(data):
     answers = data["answers"]
-    tier, min_conf, reasons = qc_priority(answers)
-    return {
+    keywords = (data.get("threat") or {}).get("keywords") or []
+    model_department = answers["department"]["choice"]
+    department = model_department
+    if keywords:
+        department = THREAT_DEPARTMENT
+    tier, min_conf, reasons = qc_priority(answers, keywords=keywords,
+                                          model_department=model_department)
+    summary = {
         "branch": answers["branch"]["choice"],
-        "department": answers["department"]["choice"],
+        "department": department,
         "recipient": answers["recipient"]["choice"],
         "confidence": {k: round(v["confidence"], 3) for k, v in answers.items()},
         "qc": {"tier": tier, "sort_key": [tier, round(min_conf, 3)], "reasons": reasons},
         "usage": data.get("usage"),
     }
+    if keywords:
+        summary["threat"] = {"keywords": keywords, "model_department": model_department}
+    return summary
