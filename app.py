@@ -117,10 +117,9 @@ st.set_page_config(page_title="Mailroom Classification", layout="wide")
 st.title("Mailroom Classification")
 
 with st.sidebar:
-    st.header("Connection")
-    endpoint = st.text_input("Endpoint", value=_secret("AI_BASE_URL"), type="password")
-    api_key = st.text_input("API key", value=_secret("AI_API_KEY"), type="password")
-    model = st.text_input("Model", value=_secret("AI_DECISION_MODEL") or "clef-flash")
+    endpoint = _secret("AI_BASE_URL")
+    api_key = _secret("AI_API_KEY")
+    model = _secret("AI_DECISION_MODEL") or "clef-flash"
     st.divider()
     _seed_option_texts()
     with st.expander("Routing options"):
@@ -194,8 +193,8 @@ if classify_btn and uploaded is not None:
         _set_proposal({"dry_run_payload": payloads})
     else:
         if not endpoint or not api_key:
-            st.error("The endpoint or API key is missing — fill them in the sidebar, "
-                     ".streamlit/secrets.toml, or the environment.")
+            st.error("The endpoint or API key is missing — fill them in "
+                     ".streamlit/secrets.toml or the environment.")
             st.stop()
         with st.spinner("Reading the scan…"):
             try:

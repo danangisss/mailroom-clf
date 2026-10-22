@@ -1,6 +1,6 @@
 [project]
 name = "mailroom-clf"
-version = "0.3.0"
+version = "0.4.0"
 description = "Classify scanned mail into branch, department, and recipient with a local vision model."
 readme = "README.md"
 authors = [
